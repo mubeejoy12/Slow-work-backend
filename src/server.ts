@@ -1,13 +1,49 @@
-import fastify from "fastify";
+import fastify, {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+} from "fastify";
 import mongoose from "mongoose";
 import { PORT, MONGO_URI } from "./config/env";
-import { authRoutes } from "./routes/auth"; 
+import { authRoutes } from "./routes/auth";
+import authPlugin from "./plugins/authPlugin";
+import { userRoutes } from "./routes/user";
+import { bookingRoutes } from "./routes/booking";
 
-const app = fastify({ logger: true });
 
+
+const app: FastifyInstance = fastify({ logger: true });
+
+app.register(authPlugin);
+app.register(userRoutes);
+app.register(bookingRoutes);
+// Health check: verify server + MongoDB
 app.get("/health", async () => {
-  return { status: "ok" };
+  const mongoState = mongoose.connection.readyState; // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+
+  return {
+    status: mongoState === 1 ? "ok" : "degraded",
+    mongo: {
+      readyState: mongoState,
+    },
+  };
 });
+
+// Central error handler
+app.setErrorHandler(
+  async (error: Error, _request: FastifyRequest, reply: FastifyReply) => {
+    // Log full error for operators
+    app.log.error(error);
+
+    // Hide internal details from clients
+    const statusCode =
+      reply.statusCode && reply.statusCode >= 400 ? reply.statusCode : 500;
+
+    return reply.status(statusCode).send({
+      message: statusCode === 500 ? "Internal server error" : error.message,
+    });
+  }
+);
 
 app.register(authRoutes);
 
